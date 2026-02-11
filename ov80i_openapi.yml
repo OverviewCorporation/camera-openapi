@@ -1976,7 +1976,8 @@ components:
         cameraSettings:
           $ref: "#/components/schemas/CameraSettings"
         captureNotes:
-          $ref: "#/components/schemas/CaptureNote"
+          allOf:
+            - $ref: "#/components/schemas/CaptureNote"
           nullable: true
 
     CaptureNote:
@@ -2062,10 +2063,12 @@ components:
         - type: object
           properties:
             cameraSettings:
-              $ref: "#/components/schemas/CameraSettings"
+              allOf:
+                - $ref: "#/components/schemas/CameraSettings"
               nullable: true
             captureNotes:
-              $ref: "#/components/schemas/CaptureNote"
+              allOf:
+                - $ref: "#/components/schemas/CaptureNote"
               nullable: true
             alignmentResults:
               type: array

@@ -1,0 +1,1615 @@
+openapi: 3.0.3
+info:
+  title: OV20i Edge API
+  version: "2026.02.10"
+
+servers:
+  - url: http://192.168.1.1
+
+tags:
+  - name: Healthcheck
+  - name: Recipe
+  - name: Camera & Captures
+  - name: Device
+  - name: Files
+  - name: Updates
+  - name: Certificates
+  - name: Web Server
+  - name: Industrial Ethernet
+  - name: Node-RED
+  - name: Remote Storage
+  - name: Environment
+
+paths:
+  # ── Healthcheck ──────────────────────────────────────────────
+  /edge/healthcheck:
+    get:
+      tags: [Healthcheck]
+      summary: Device health status
+      operationId: healthcheck
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  generate_data_progress:
+                    nullable: true
+                  training_progress:
+                    nullable: true
+
+  /edge/version:
+    get:
+      tags: [Healthcheck]
+      summary: Get software version
+      operationId: getVersion
+      responses:
+        "200":
+          description: Version
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+                    example: ov20i_2025.12
+
+  /edge/swap_memory_stats:
+    get:
+      tags: [Healthcheck]
+      summary: Get swap memory statistics
+      operationId: getSwapMemoryStats
+      responses:
+        "200":
+          description: Swap memory stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: number
+                    format: float
+                    example: 2048.0
+                  used:
+                    type: number
+                    format: float
+                    example: 512.0
+                  free:
+                    type: number
+                    format: float
+                    example: 1536.0
+                  percent_used:
+                    type: number
+                    format: float
+                    example: 25.0
+                  unit:
+                    type: string
+                    example: MB
+
+  # ── Recipe / Pipeline Management ─────────────────────────────
+  /edge/pipeline:
+    post:
+      tags: [Recipe]
+      summary: Create a new pipeline/recipe
+      operationId: createPipeline
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  example: New Recipe
+                description:
+                  type: string
+                recipe_type:
+                  type: string
+                  example: standard
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "400":
+          description: Invalid or missing JSON body
+
+  /edge/pipeline/activate:
+    post:
+      tags: [Recipe]
+      summary: Activate recipe by database ID (legacy)
+      description: Legacy endpoint — same handler as POST /edge/recipe/activate.
+      operationId: activatePipeline
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id:
+                  type: integer
+                  example: 22
+      responses:
+        "200":
+          description: Activated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "400":
+          description: Invalid or missing payload
+        "408":
+          description: Recipe switch timed out
+        "429":
+          description: Another recipe switch is in progress
+        "500":
+          description: Recipe switch failed
+
+  /edge/recipe/activate:
+    post:
+      tags: [Recipe]
+      summary: Activate recipe by database ID
+      operationId: activateRecipeById
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id:
+                  type: integer
+                  example: 22
+      responses:
+        "200":
+          description: Activated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "400":
+          description: Invalid or missing payload
+        "408":
+          description: Recipe switch timed out
+        "429":
+          description: Another recipe switch is in progress
+        "500":
+          description: Recipe switch failed
+
+  /edge/api/recipes/{recipe_id}/activate:
+    parameters:
+      - name: recipe_id
+        in: path
+        required: true
+        description: PLC recipe ID
+        schema:
+          type: integer
+    post:
+      tags: [Recipe]
+      summary: Activate recipe by PLC recipe ID
+      operationId: activateRecipeByPlcId
+      responses:
+        "200":
+          description: Activated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  recipe_id:
+                    type: integer
+        "404":
+          description: Recipe not found
+        "429":
+          description: Another recipe switch is in progress
+        "500":
+          description: Error activating recipe
+        "504":
+          description: Timeout while activating recipe
+
+  /edge/recipe/export:
+    post:
+      tags: [Recipe]
+      summary: Export recipe as ZIP
+      operationId: exportRecipe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [recipe_id]
+              properties:
+                recipe_id:
+                  type: integer
+                  example: 22
+                max_images:
+                  type: integer
+                  example: 100
+                include_library_captures:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Streaming ZIP file
+          headers:
+            X-Approx-Size-Bytes:
+              description: Approximate ZIP size in bytes
+              schema:
+                type: integer
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Missing payload
+        "500":
+          description: Export error
+
+  /edge/recipe/import:
+    post:
+      tags: [Recipe]
+      summary: Import recipe from ZIP or tarball
+      operationId: importRecipe
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Imported successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  details:
+                    type: string
+                  result:
+                    type: integer
+                    description: New recipe database ID
+        "400":
+          description: No file provided
+        "422":
+          description: Empty filename or invalid recipe content
+        "429":
+          description: Another import is in progress
+        "500":
+          description: Import error
+
+  /edge/recipe/change_plc_recipe_id:
+    post:
+      tags: [Recipe]
+      summary: Change PLC recipe ID
+      operationId: changePlcRecipeId
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [recipe_id, target_plc_recipe_id]
+              properties:
+                recipe_id:
+                  type: integer
+                  example: 22
+                target_plc_recipe_id:
+                  type: integer
+                  minimum: 0
+                  maximum: 65535
+                  example: 5
+                restart_pipeline:
+                  type: boolean
+                  default: true
+      responses:
+        "200":
+          description: Success
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: Success
+        "400":
+          description: Missing fields or ID out of range (0–65535)
+        "409":
+          description: PLC recipe ID already exists
+
+  /edge/recipe/rename:
+    post:
+      tags: [Recipe]
+      summary: Rename a recipe
+      operationId: renameRecipe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [recipe_id, name]
+              properties:
+                recipe_id:
+                  type: integer
+                  example: 22
+                name:
+                  type: string
+                  example: Updated Recipe Name
+      responses:
+        "200":
+          description: Success
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: Success
+        "400":
+          description: Missing parameters or empty/whitespace name
+        "404":
+          description: Recipe not found
+
+  /edge/recipe/deployable:
+    get:
+      tags: [Recipe]
+      summary: Check if active recipe is deployable
+      operationId: getDeployable
+      responses:
+        "200":
+          description: Deployable status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deployable:
+                    type: boolean
+
+  # ── Camera & Captures ───────────────────────────────────────
+  /edge/camera/capture:
+    post:
+      tags: [Camera & Captures]
+      summary: Capture a single frame
+      operationId: captureCamera
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subdir:
+                  type: string
+                  example: library_captures
+      responses:
+        "200":
+          description: Capture object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Capture"
+
+  /edge/captures/upload:
+    post:
+      tags: [Camera & Captures]
+      summary: Upload an image as a new capture
+      operationId: uploadCapture
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Capture with notes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaptureWithNotes"
+        "400":
+          description: Missing file
+        "415":
+          description: Unsupported file type (only jpg, jpeg, png)
+        "422":
+          description: Empty filename
+
+  /edge/captures/delete:
+    post:
+      tags: [Camera & Captures]
+      summary: Delete multiple captures by ID
+      operationId: deleteCaptures
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  items:
+                    type: integer
+                  example: [123, 124, 125]
+      responses:
+        "200":
+          description: Deletion result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  successfull:
+                    type: array
+                    items:
+                      type: integer
+                  failed:
+                    type: array
+                    items:
+                      type: integer
+        "400":
+          description: Missing or invalid body
+
+  /edge/capture_result:
+    get:
+      tags: [Camera & Captures]
+      summary: Get capture results for active recipe
+      operationId: getCaptureResults
+      responses:
+        "200":
+          description: Array of capture results (most recent first)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CaptureResult"
+
+  /edge/capture_result/user_metadata/keys:
+    get:
+      tags: [Camera & Captures]
+      summary: List user metadata keys (sorted by frequency)
+      operationId: getCaptureResultMetadataKeys
+      responses:
+        "200":
+          description: Array of key strings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                example: ["batch_id", "operator"]
+
+  /edge/camera/do:
+    post:
+      tags: [Camera & Captures]
+      summary: Set a digital output pin value
+      operationId: setDigitalOutput
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pin, value]
+              properties:
+                pin:
+                  type: integer
+                  example: 1
+                value:
+                  type: integer
+                  example: 1
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Missing pin/value or hardware error
+
+  /edge/camera/led_color:
+    get:
+      tags: [Camera & Captures]
+      summary: Get current LED color
+      operationId: getLedColor
+      responses:
+        "200":
+          description: LED color value (0=off, 1=green, 2=orange, 3=yellow)
+          content:
+            text/plain:
+              schema:
+                type: integer
+                enum: [0, 1, 2, 3]
+    post:
+      tags: [Camera & Captures]
+      summary: Set LED color
+      operationId: setLedColor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value:
+                  type: integer
+                  enum: [0, 1, 2, 3]
+                  description: "0=off, 1=green, 2=orange, 3=yellow"
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Missing or invalid payload
+
+  # ── Device & System ─────────────────────────────────────────
+  /edge/device/name:
+    get:
+      tags: [Device]
+      summary: Get device name
+      operationId: getDeviceName
+      responses:
+        "200":
+          description: Device name
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    example: camera_01
+    post:
+      tags: [Device]
+      summary: Set device name
+      operationId: setDeviceName
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  example: camera_01
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+        "400":
+          description: Missing or invalid payload
+
+  /edge/device/network:
+    get:
+      tags: [Device]
+      summary: Get network configuration
+      operationId: getNetwork
+      responses:
+        "200":
+          description: Network configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkConfig"
+    post:
+      tags: [Device]
+      summary: Update network configuration
+      operationId: setNetwork
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NetworkSettings"
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid payload
+        "500":
+          description: Validation error
+
+  /edge/device/storage:
+    get:
+      tags: [Device]
+      summary: Get storage usage
+      operationId: getStorage
+      responses:
+        "200":
+          description: Storage info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageInfo"
+
+  /edge/device/serial_number:
+    get:
+      tags: [Device]
+      summary: Get device serial number
+      operationId: getSerialNumber
+      responses:
+        "200":
+          description: Serial number
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  serial_number:
+                    type: string
+                    example: gsac059110
+
+  /edge/device/activation:
+    get:
+      tags: [Device]
+      summary: Get activation status
+      operationId: getActivation
+      responses:
+        "200":
+          description: Activation status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  activated:
+                    type: boolean
+
+  /edge/device/hostname:
+    get:
+      tags: [Device]
+      summary: Get hostname
+      operationId: getHostname
+      responses:
+        "200":
+          description: Hostname
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hostname:
+                    type: string
+                    example: ov20i-gsac059110
+    post:
+      tags: [Device]
+      summary: Set hostname
+      operationId: setHostname
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hostname]
+              properties:
+                hostname:
+                  type: string
+                  example: ov20i-gsac059110
+      responses:
+        "200":
+          description: Hostname set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hostname:
+                    type: string
+        "400":
+          description: Missing or invalid hostname
+        "500":
+          description: Failed to set hostname
+
+  /edge/device/camera_type:
+    get:
+      tags: [Device]
+      summary: Get camera model type
+      operationId: getCameraType
+      responses:
+        "200":
+          description: Camera type
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  camera_type:
+                    type: string
+                    example: ov20i
+
+  /edge/device/time:
+    get:
+      tags: [Device]
+      summary: Get system time in microseconds
+      operationId: getTime
+      responses:
+        "200":
+          description: System time
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  now_us:
+                    type: integer
+                    format: int64
+                    example: 1770728704381184
+    post:
+      tags: [Device]
+      summary: Set system time in microseconds
+      operationId: setTime
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [now_us]
+              properties:
+                now_us:
+                  type: integer
+                  format: int64
+                  example: 1770728704381184
+      responses:
+        "200":
+          description: Time set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  now_us:
+                    type: integer
+                    format: int64
+        "400":
+          description: Missing payload
+
+  /edge/device/ntp:
+    get:
+      tags: [Device]
+      summary: Get NTP configuration
+      operationId: getNtp
+      responses:
+        "200":
+          description: NTP config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NtpConfig"
+    post:
+      tags: [Device]
+      summary: Update NTP configuration
+      operationId: setNtp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NtpConfig"
+      responses:
+        "200":
+          description: Successfully set NTP configuration
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: Missing payload
+
+  /edge/device/restart:
+    post:
+      tags: [Device]
+      summary: Restart device
+      operationId: restartDevice
+      responses:
+        "200":
+          description: Restarting
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ── Files ────────────────────────────────────────────────────
+  /edge/files/{file_path}:
+    parameters:
+      - name: file_path
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Files]
+      summary: Download a file from the data directory
+      operationId: downloadFile
+      parameters:
+        - name: cache_max_age
+          in: query
+          schema:
+            type: integer
+          description: Cache duration in seconds
+        - name: width
+          in: query
+          schema:
+            type: integer
+          description: Resize width for JPEG images
+      responses:
+        "200":
+          description: File bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: File not found
+
+  # ── Updates ──────────────────────────────────────────────────
+  /edge/update:
+    get:
+      tags: [Updates]
+      summary: List update files
+      operationId: listUpdates
+      responses:
+        "200":
+          description: Array of update file objects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UpdateFile"
+    delete:
+      tags: [Updates]
+      summary: Delete an update file
+      operationId: deleteUpdate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [filename]
+              properties:
+                filename:
+                  type: string
+                  example: update_v2.tar.gz
+      responses:
+        "200":
+          description: Deleted
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: Missing body, is a directory, or invalid filename
+        "404":
+          description: File not found
+
+  /edge/update/status:
+    get:
+      tags: [Updates]
+      summary: Get update status
+      operationId: getUpdateStatus
+      responses:
+        "200":
+          description: Update status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: finished
+                  logs:
+                    type: string
+                    description: Included when status is "error"
+
+  # ── Certificates ─────────────────────────────────────────────
+  /edge/certificates:
+    get:
+      tags: [Certificates]
+      summary: List HTTPS certificates
+      operationId: listCertificates
+      responses:
+        "200":
+          description: Array of certificates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Certificate"
+        "500":
+          description: Failed to list certificates
+
+  /edge/certificates/upload:
+    post:
+      tags: [Certificates]
+      summary: Upload a PKCS#12 or certificate + key pair
+      operationId: uploadCertificate
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  description: Certificate name
+                password:
+                  type: string
+                  description: Password for PKCS#12 files (optional)
+                pkcs12:
+                  type: string
+                  format: binary
+                  description: PKCS#12 file (provide this OR both certificate + key)
+                certificate:
+                  type: string
+                  format: binary
+                  description: Certificate file
+                key:
+                  type: string
+                  format: binary
+                  description: Private key file
+      responses:
+        "201":
+          description: Certificate uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  certificate:
+                    type: object
+        "400":
+          description: Missing name, no file, invalid format, or no cert/key
+        "500":
+          description: Upload failure
+
+  /edge/certificates/self-signed:
+    post:
+      tags: [Certificates]
+      summary: Create a self-signed certificate
+      operationId: createSelfSignedCertificate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, common_name]
+              properties:
+                name:
+                  type: string
+                  example: Self-Signed Cert
+                common_name:
+                  type: string
+                  example: ov20i.local
+                organization:
+                  type: string
+                  example: Overview
+                organizationalUnit:
+                  type: string
+                  example: Engineering
+                country:
+                  type: string
+                  example: US
+                validity_days:
+                  type: integer
+                  example: 365
+                ip_address:
+                  type: string
+                  example: 192.168.15.111
+      responses:
+        "200":
+          description: Certificate created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  certificate:
+                    type: object
+        "400":
+          description: Missing body or validation error
+        "500":
+          description: Creation failure
+
+  /edge/certificates/{certificate_id}:
+    parameters:
+      - name: certificate_id
+        in: path
+        required: true
+        schema:
+          type: integer
+    delete:
+      tags: [Certificates]
+      summary: Delete a certificate
+      operationId: deleteCertificate
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          description: Active certificate cannot be deleted while HTTPS is enabled
+        "404":
+          description: Certificate not found
+        "500":
+          description: Failed to delete certificate
+
+  /edge/certificates/{certificate_id}/set_active:
+    parameters:
+      - name: certificate_id
+        in: path
+        required: true
+        schema:
+          type: integer
+    post:
+      tags: [Certificates]
+      summary: Set certificate as active
+      operationId: setActiveCertificate
+      responses:
+        "200":
+          description: Certificate activated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  certificate_id:
+                    type: integer
+        "404":
+          description: Certificate not found
+        "500":
+          description: Failed to set certificate as active
+
+  /edge/certificates/{certificate_id}/download:
+    parameters:
+      - name: certificate_id
+        in: path
+        required: true
+        schema:
+          type: integer
+    get:
+      tags: [Certificates]
+      summary: Download a certificate file
+      operationId: downloadCertificate
+      responses:
+        "200":
+          description: Certificate file
+          content:
+            application/x-x509-ca-cert:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Certificate or file not found
+        "500":
+          description: Failed to download certificate
+
+  # ── Web Server ───────────────────────────────────────────────
+  /edge/web_server/protocols:
+    get:
+      tags: [Web Server]
+      summary: Get HTTP/HTTPS enablement
+      operationId: getProtocols
+      responses:
+        "200":
+          description: Protocol status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http:
+                    type: boolean
+                  https:
+                    type: boolean
+    post:
+      tags: [Web Server]
+      summary: Update HTTP/HTTPS enablement
+      operationId: setProtocols
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                http:
+                  type: boolean
+                https:
+                  type: boolean
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+        "400":
+          description: Missing/invalid fields or both disabled
+        "500":
+          description: Failed to update protocol
+
+  # ── Industrial Ethernet ──────────────────────────────────────
+  /edge/industrial_ethernet/protocol:
+    get:
+      tags: [Industrial Ethernet]
+      summary: Get active industrial ethernet protocol
+      operationId: getIndustrialProtocol
+      responses:
+        "200":
+          description: Active protocol
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  active_protocol:
+                    type: string
+                    enum: [ethernetip, profinet]
+                    example: ethernetip
+        "500":
+          description: Failed to get protocol
+    post:
+      tags: [Industrial Ethernet]
+      summary: Set active industrial ethernet protocol
+      operationId: setIndustrialProtocol
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [active_protocol]
+              properties:
+                active_protocol:
+                  type: string
+                  enum: [ethernetip, profinet]
+                  example: ethernetip
+      responses:
+        "200":
+          description: Success
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: Success
+        "400":
+          description: Missing or invalid payload
+        "500":
+          description: Failed to set protocol
+
+  /edge/download/industrial_ethernet/ethernet_ip_eds:
+    get:
+      tags: [Industrial Ethernet]
+      summary: Download Ethernet/IP EDS ZIP
+      operationId: downloadEdsZip
+      responses:
+        "200":
+          description: ZIP file
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: EDS file not found
+        "500":
+          description: Download failed
+
+  /edge/download/industrial_ethernet/profinet_gsdml:
+    get:
+      tags: [Industrial Ethernet]
+      summary: Download Profinet GSDML ZIP
+      operationId: downloadGsdmlZip
+      responses:
+        "200":
+          description: ZIP file
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: GSDML file not found
+        "500":
+          description: Download failed
+
+  /edge/industrial_ethernet/profinet/device_name:
+    get:
+      tags: [Industrial Ethernet]
+      summary: Get Profinet device name
+      operationId: getProfinetDeviceName
+      responses:
+        "200":
+          description: Profinet device name
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profinet_device_name:
+                    type: string
+                    example: OV20i
+        "500":
+          description: Failed to get Profinet device name
+    post:
+      tags: [Industrial Ethernet]
+      summary: Set Profinet device name
+      operationId: setProfinetDeviceName
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [profinet_device_name]
+              properties:
+                profinet_device_name:
+                  type: string
+                  example: OV20i
+      responses:
+        "200":
+          description: Success
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: Success
+        "400":
+          description: Profinet not active or invalid payload
+        "500":
+          description: Failed to set Profinet device name
+
+  # ── Node-RED ─────────────────────────────────────────────────
+  /edge/nodered/flow:
+    get:
+      tags: [Node-RED]
+      summary: Get Node-RED flow for active recipe
+      operationId: getNodeRedFlow
+      responses:
+        "200":
+          description: Flow data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nodered_flow:
+                    $ref: "#/components/schemas/NodeRedFlow"
+        "404":
+          description: Flow not found
+    post:
+      tags: [Node-RED]
+      summary: Create or update Node-RED flow
+      operationId: upsertNodeRedFlow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nodered_flow]
+              properties:
+                nodered_flow:
+                  $ref: "#/components/schemas/NodeRedFlow"
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: Invalid payload
+    patch:
+      tags: [Node-RED]
+      summary: Partially update Node-RED flow
+      operationId: patchNodeRedFlow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nodered_flow:
+                  $ref: "#/components/schemas/NodeRedFlow"
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: Invalid payload
+
+  /edge/nodered/update_flow:
+    post:
+      tags: [Node-RED]
+      summary: Callback from Node-RED when user updates a flow
+      description: Updates DB and syncs when Node-RED notifies of a flow change.
+      operationId: nodeRedUpdateFlow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Flow JSON payload
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: Invalid or missing JSON body
+
+  # ── Remote Storage ───────────────────────────────────────────
+  /edge/remote_storage/upload_test:
+    get:
+      tags: [Remote Storage]
+      summary: Test remote storage upload
+      description: Creates a temporary file and queues it for upload.
+      operationId: remoteStorageUploadTest
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: OK
+        "500":
+          description: Queue full or failed to queue
+
+  # ── Environment Variables ────────────────────────────────────
+  /edge/environmental_variables:
+    get:
+      tags: [Environment]
+      summary: Get Node-RED environment variables
+      operationId: getEnvVars
+      responses:
+        "200":
+          description: Environment variables as plain text
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |
+                  LINE_CODE=line1
+                  CAMERA_TIMEZONE=GMT-3
+                  DATE_INSTALLED=2026-01-01
+        "500":
+          description: Failed to read environment variables
+    post:
+      tags: [Environment]
+      summary: Overwrite Node-RED environment variables
+      operationId: setEnvVars
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+              example: |
+                LINE_CODE=line2
+                CAMERA_TIMEZONE=GMT-5
+                DATE_INSTALLED=2026-01-01
+      responses:
+        "200":
+          description: Environment file updated successfully
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: Empty body
+        "500":
+          description: Failed to write environment variables
+
+# ═══════════════════════════════════════════════════════════════
+components:
+  schemas:
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        details:
+          type: string
+        result:
+          description: Varies by endpoint
+
+    Capture:
+      type: object
+      properties:
+        id:
+          type: integer
+        file_path:
+          type: string
+        recipe_id:
+          type: integer
+        captured_at:
+          type: string
+          format: date-time
+
+    CaptureWithNotes:
+      allOf:
+        - $ref: "#/components/schemas/Capture"
+        - type: object
+          properties:
+            capture_notes:
+              type: object
+              properties:
+                notes:
+                  type: string
+
+    CaptureResult:
+      type: object
+      properties:
+        id:
+          type: integer
+        capture_id:
+          type: integer
+        recipe_id:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    NetworkConfig:
+      type: object
+      properties:
+        active:
+          $ref: "#/components/schemas/NetworkSettings"
+        configuration:
+          $ref: "#/components/schemas/NetworkSettings"
+        mac_address:
+          type: string
+          example: "3C:6D:66:01:82:0C"
+
+    NetworkSettings:
+      type: object
+      properties:
+        address:
+          type: string
+          example: 192.168.15.111
+        dns:
+          type: array
+          items:
+            type: string
+        gateway:
+          type: string
+          example: 192.168.15.1
+        mode:
+          type: string
+          enum: [static, dhcp]
+        netmask:
+          type: string
+          example: 255.255.255.0
+
+    StorageInfo:
+      type: object
+      properties:
+        total:
+          type: integer
+          format: int64
+        used:
+          type: integer
+          format: int64
+        free:
+          type: integer
+          format: int64
+        percent:
+          type: number
+          format: float
+        endurance:
+          nullable: true
+
+    NtpConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        servers:
+          type: array
+          items:
+            type: string
+
+    UpdateFile:
+      type: object
+      properties:
+        filename:
+          type: string
+        last_modified:
+          type: number
+          format: double
+        name:
+          type: string
+        size:
+          type: integer
+          format: int64
+        valid:
+          type: boolean
+
+    Certificate:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        common_name:
+          type: string
+        is_active:
+          type: boolean
+        expires_at:
+          type: string
+          format: date-time
+
+    NodeRedFlow:
+      type: object
+      properties:
+        flow:
+          description: Flow definition (array or object)
+        basic_mode:
+          type: boolean
+        basic_flow_id:
+          type: string
+        basic_flow_metadata:
+          type: object
+          additionalProperties: true
