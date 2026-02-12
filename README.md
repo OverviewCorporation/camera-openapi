@@ -6,8 +6,8 @@ OpenAPI specifications for Overview camera APIs.
 
 | File | Description |
 |------|-------------|
-| [ov20i_openapi.yml](./ov20i_openapi.yml) | Known OV20i APIs |
-| [ov80i_openapi.yml](./ov80i_openapi.yml) | Known OV80i APIs |
+| [ov20i_2026_02_10_openapi.yml](./ov20i_2026_02_10_openapi.yml) | Known OV20i APIs |
+| [ov80i_2026_02_01_openapi.yml](./ov80i_2026_02_01_openapi.yml) | Known OV80i APIs |
 
 ## Usage
 
