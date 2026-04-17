@@ -4,10 +4,24 @@ OpenAPI specifications for Overview camera APIs.
 
 ## Specs
 
-| File | Description |
-|------|-------------|
-| [ov20i_2026_02_10_openapi.yml](./ov20i_2026_02_10_openapi.yml) | Known OV20i APIs |
-| [ov80i_2026_02_01_openapi.yml](./ov80i_2026_02_01_openapi.yml) | Known OV80i APIs |
+Each spec file is named after the firmware release tag it documents (the
+same tag you'll find on a camera via `GET /edge/v2/device/version`). Pick
+the file that matches your device's firmware release; opening the matching
+file directly is the way to see the API at that version, rather than
+diffing git history on a single file.
+
+### OV20i
+
+| File | Release tag | Released | Notes |
+|------|-------------|----------|-------|
+| [ov20i_v2026.2.1_openapi.yml](./ov20i_v2026.2.1_openapi.yml) | `v2026.2.1` | 2026-02-23 | Shared release tag; also covers OV20i builds off the same commit |
+
+### OV80i
+
+| File | Release tag | Released | Notes |
+|------|-------------|----------|-------|
+| [ov80i_v2026.4.0_openapi.yml](./ov80i_v2026.4.0_openapi.yml) | `v2026.4.0-OV80i` | 2026-04-09 | Current; includes `GET /edge/v2/device/network/link` |
+| [ov80i_v2026.3.1_openapi.yml](./ov80i_v2026.3.1_openapi.yml) | `v2026.3.1-OV80i` | 2026-03-10 | Last OV80i release before `/edge/v2/device/network/link` was added (2026-03-11) — also a faithful reference for any earlier `-OV80i` firmware since the documented surface didn't change between them |
 
 ## Usage
 

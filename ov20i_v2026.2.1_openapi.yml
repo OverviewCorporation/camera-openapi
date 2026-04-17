@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: OV20i Edge API
-  version: "2026.02.10"
+  version: "v2026.2.1"
 
 servers:
   - url: http://192.168.1.1
