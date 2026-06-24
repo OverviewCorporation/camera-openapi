@@ -388,6 +388,25 @@ paths:
                   deployable:
                     type: boolean
 
+  /edge/recipe/{id}/imaging-settings:
+    parameters:
+      - $ref: "#/components/parameters/RecipeId"
+    patch:
+      tags: [Recipe]
+      summary: Update imaging settings for a recipe
+      operationId: updateImagingSettings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImagingSettings"
+      responses:
+        "204":
+          description: Updated successfully
+        "400":
+          description: Missing or invalid body
+
   # ── Camera & Captures ───────────────────────────────────────
   /edge/camera/capture:
     post:
@@ -1463,6 +1482,14 @@ paths:
 
 # ═══════════════════════════════════════════════════════════════
 components:
+  parameters:
+    RecipeId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+
   schemas:
     SuccessResponse:
       type: object
@@ -1613,3 +1640,86 @@ components:
         basic_flow_metadata:
           type: object
           additionalProperties: true
+
+    # ── Imaging Settings ─────────────────────────────────────────
+    ImagingSettings:
+      type: object
+      properties:
+        acq_mode:
+          type: integer
+          enum: [1, 2, 3, 4, 5, 6]
+        aligner_trigger_debounce_ms:
+          type: integer
+        awb_blue:
+          type: integer
+        awb_green:
+          type: integer
+        awb_red:
+          type: integer
+        awb_op:
+          type: boolean
+        basler_light_source_preset:
+          type: string
+          example: Daylight5000K
+        brightness:
+          type: integer
+        estimated_capture_time:
+          type: integer
+        exposure:
+          type: integer
+        focal_length:
+          type: number
+          format: float
+        focus:
+          type: integer
+          minimum: 0
+          maximum: 1600
+          example: 800
+        focus_distance:
+          type: integer
+          example: 25
+        gain:
+          type: integer
+        gamma:
+          type: integer
+        hdr_mode_enabled:
+          type: boolean
+        interval_trigger_period:
+          type: integer
+        led_gain:
+          type: integer
+          minimum: 0
+          example: 5
+        led_mode:
+          type: integer
+          minimum: 0
+          maximum: 7
+          enum: [0, 1, 2, 3, 4, 5, 6, 7]
+          example: 3
+        led_strobe_mode:
+          type: boolean
+        lens_correct:
+          type: boolean
+        photometric_enabled:
+          type: boolean
+        photometric_mode:
+          type: integer
+          minimum: 0
+          maximum: 2
+          enum: [0, 1, 2]
+        preview_image_path:
+          type: string
+          nullable: true
+        recipe_id:
+          type: integer
+        rotation_mode:
+          type: integer
+          enum: [0, 1, 2, 3]
+        smart_roi:
+          nullable: true
+        status:
+          type: string
+        trigger_debounce:
+          type: integer
+        trigger_delay:
+          type: integer
