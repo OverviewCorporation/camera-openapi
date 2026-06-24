@@ -2264,6 +2264,7 @@ components:
           type: integer
         acqMode:
           type: integer
+          enum: [1, 2, 3, 4, 5, 6]
         alignerTriggerDebounceMs:
           type: integer
         awbBlue:
@@ -2286,10 +2287,6 @@ components:
         focalLength:
           type: number
           format: float
-        focus:
-          type: integer
-        focusDistance:
-          type: integer
         gain:
           type: integer
         gamma:
@@ -2298,23 +2295,14 @@ components:
           type: boolean
         intervalTriggerPeriod:
           type: integer
-        ledGain:
-          type: integer
-        ledMode:
-          type: integer
-        ledStrobeMode:
-          type: boolean
         lensCorrect:
           type: boolean
-        photometricEnabled:
-          type: boolean
-        photometricMode:
-          type: integer
         previewImagePath:
           type: string
           nullable: true
         rotationMode:
           type: integer
+          enum: [0, 1, 2, 3]
         smartRoi:
           nullable: true
         status:
@@ -2719,6 +2707,7 @@ components:
       properties:
         acq_mode:
           type: integer
+          enum: [1, 2, 3, 4, 5, 6]
         aligner_trigger_debounce_ms:
           type: integer
         awb_blue:
@@ -2741,10 +2730,6 @@ components:
         focal_length:
           type: number
           format: float
-        focus:
-          type: integer
-        focus_distance:
-          type: integer
         gain:
           type: integer
         gamma:
@@ -2753,18 +2738,8 @@ components:
           type: boolean
         interval_trigger_period:
           type: integer
-        led_gain:
-          type: integer
-        led_mode:
-          type: integer
-        led_strobe_mode:
-          type: boolean
         lens_correct:
           type: boolean
-        photometric_enabled:
-          type: boolean
-        photometric_mode:
-          type: integer
         preview_image_path:
           type: string
           nullable: true
@@ -2772,6 +2747,7 @@ components:
           type: integer
         rotation_mode:
           type: integer
+          enum: [0, 1, 2, 3]
         smart_roi:
           nullable: true
         status:
