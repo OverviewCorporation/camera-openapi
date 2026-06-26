@@ -23,23 +23,33 @@ API at that version, rather than diffing git history on a single file.
 
 | File | Release tag |
 |------|-------------|
+| [ov20i_v2026.5.5_openapi.yml](./ov20i_v2026.5.5_openapi.yml) | `v2026.5.5` |
+| [ov20i_v2026.5.4_openapi.yml](./ov20i_v2026.5.4_openapi.yml) | `v2026.5.4` |
 | [ov20i_v2026.5.3_openapi.yml](./ov20i_v2026.5.3_openapi.yml) | `v2026.5.3` |
 | [ov20i_v2026.5.2_openapi.yml](./ov20i_v2026.5.2_openapi.yml) | `v2026.5.2` |
 | [ov20i_v2026.5.1_openapi.yml](./ov20i_v2026.5.1_openapi.yml) | `v2026.5.1` |
 | [ov20i_v2026.5.0_openapi.yml](./ov20i_v2026.5.0_openapi.yml) | `v2026.5.0` |
 | [ov20i_v2026.3.0_openapi.yml](./ov20i_v2026.3.0_openapi.yml) | `v2026.3.0` |
 | [ov20i_v2026.2.1_openapi.yml](./ov20i_v2026.2.1_openapi.yml) | `v2026.2.1` |
+| [ov20i_v2026.2.0_openapi.yml](./ov20i_v2026.2.0_openapi.yml) | `v2026.2.0` |
+| [ov20i_v2026.1.0_openapi.yml](./ov20i_v2026.1.0_openapi.yml) | `v2026.1.0` |
 
 ### OV80i
 
 | File | Release tag |
 |------|-------------|
 | [ov80i_v2026.6.0_openapi.yml](./ov80i_v2026.6.0_openapi.yml) | `v2026.6.0-OV80i` |
+| [ov80i_v2026.4.4_openapi.yml](./ov80i_v2026.4.4_openapi.yml) | `v2026.4.4-OV80i` |
+| [ov80i_v2026.4.3_openapi.yml](./ov80i_v2026.4.3_openapi.yml) | `v2026.4.3-OV80i` |
+| [ov80i_v2026.4.2_openapi.yml](./ov80i_v2026.4.2_openapi.yml) | `v2026.4.2-OV80i` |
+| [ov80i_v2026.4.1_openapi.yml](./ov80i_v2026.4.1_openapi.yml) | `v2026.4.1-OV80i` |
 | [ov80i_v2026.4.0_openapi.yml](./ov80i_v2026.4.0_openapi.yml) | `v2026.4.0-OV80i` |
 | [ov80i_v2026.3.12_openapi.yml](./ov80i_v2026.3.12_openapi.yml) | `v2026.3.12-OV80i` |
+| [ov80i_v2026.3.4_openapi.yml](./ov80i_v2026.3.4_openapi.yml) | `v2026.3.4-OV80i` |
 | [ov80i_v2026.3.3_openapi.yml](./ov80i_v2026.3.3_openapi.yml) | `v2026.3.3-OV80i` |
 | [ov80i_v2026.3.2_openapi.yml](./ov80i_v2026.3.2_openapi.yml) | `v2026.3.2-OV80i` |
 | [ov80i_v2026.3.1_openapi.yml](./ov80i_v2026.3.1_openapi.yml) | `v2026.3.1-OV80i` |
+| [ov80i_v2026.3.0_openapi.yml](./ov80i_v2026.3.0_openapi.yml) | `v2026.3.0-OV80i` |
 
 ## Usage
 
