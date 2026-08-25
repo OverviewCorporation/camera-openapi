@@ -38,6 +38,8 @@ API at that version, rather than diffing git history on a single file.
 
 | File | Release tag |
 |------|-------------|
+| [ov80i_v2026.8.1_openapi.yml](./ov80i_v2026.8.1_openapi.yml) | `v2026.8.1-OV80i` |
+| [ov80i_v2026.8.0_openapi.yml](./ov80i_v2026.8.0_openapi.yml) | `v2026.8.0-OV80i` |
 | [ov80i_v2026.6.0_openapi.yml](./ov80i_v2026.6.0_openapi.yml) | `v2026.6.0-OV80i` |
 | [ov80i_v2026.4.4_openapi.yml](./ov80i_v2026.4.4_openapi.yml) | `v2026.4.4-OV80i` |
 | [ov80i_v2026.4.3_openapi.yml](./ov80i_v2026.4.3_openapi.yml) | `v2026.4.3-OV80i` |
