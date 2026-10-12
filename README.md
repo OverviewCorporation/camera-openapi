@@ -23,6 +23,9 @@ API at that version, rather than diffing git history on a single file.
 
 | File | Release tag |
 |------|-------------|
+| [ov20i_v2026.9.2_openapi.yml](./ov20i_v2026.9.2_openapi.yml) | `v2026.9.2` |
+| [ov20i_v2026.9.1_openapi.yml](./ov20i_v2026.9.1_openapi.yml) | `v2026.9.1` |
+| [ov20i_v2026.9.0_openapi.yml](./ov20i_v2026.9.0_openapi.yml) | `v2026.9.0` |
 | [ov20i_v2026.5.5_openapi.yml](./ov20i_v2026.5.5_openapi.yml) | `v2026.5.5` |
 | [ov20i_v2026.5.4_openapi.yml](./ov20i_v2026.5.4_openapi.yml) | `v2026.5.4` |
 | [ov20i_v2026.5.3_openapi.yml](./ov20i_v2026.5.3_openapi.yml) | `v2026.5.3` |
@@ -52,6 +55,12 @@ API at that version, rather than diffing git history on a single file.
 | [ov80i_v2026.3.2_openapi.yml](./ov80i_v2026.3.2_openapi.yml) | `v2026.3.2-OV80i` |
 | [ov80i_v2026.3.1_openapi.yml](./ov80i_v2026.3.1_openapi.yml) | `v2026.3.1-OV80i` |
 | [ov80i_v2026.3.0_openapi.yml](./ov80i_v2026.3.0_openapi.yml) | `v2026.3.0-OV80i` |
+
+### Spark
+
+| File | Release tag |
+|------|-------------|
+| [spark_v2026.9.29_openapi.yml](./spark_v2026.9.29_openapi.yml) | `2026.9.29` |
 
 ## Usage
 

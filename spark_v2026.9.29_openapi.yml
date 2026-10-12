@@ -1,0 +1,2014 @@
+openapi: 3.1.0
+info:
+  title: Overview Camera Integration API
+  version: "2026.9.29"
+  contact:
+    name: Overview support
+    url: https://overview.ai
+  description: |
+    The customer-facing HTTP API of the Overview camera: trigger an
+    inspection and read its result, poll or stream results, read and reset
+    statistics, switch recipes, and read the device state.
+
+    ## Getting started
+    1. In the camera's web interface, enable the HTTP trigger source in the
+       trigger settings of the recipe you will use.
+    2. Make that recipe active (`POST /recipes/{id}/activate`, or in the web
+       interface).
+    3. Switch to run mode (`POST /mode/run`) and poll `GET /status` until
+       `mode` is `run` and `mode_changing` is false.
+    4. `POST /trigger` returns each inspection's result; `GET
+       /results/stream` follows results from every trigger source.
+
+    ## Recipe numbers
+    A recipe is identified by its recipe number (`id`, 1–32767), the same
+    number a PLC uses to select it; it is shown and can be changed on the
+    recipe's Outputs page. Recipes, results, statistics and status also carry
+    the recipe's uuid, which never changes and is never reused: key stored
+    data on it if recipes may be renumbered. A result's `recipe_id` and the
+    `recipe_id` filter of `GET /results` use the number the recipe holds
+    now, not the number it had when the result was stored.
+
+    ## Compatibility
+    Within `/api/integration/v1` changes are additive only: new endpoints,
+    new optional request fields, new response fields, new values on enums
+    documented as extensible. Existing fields never change meaning or type
+    and are never removed. A change that cannot be made additively ships as
+    `/api/integration/v2` beside v1, and v1 keeps working until a sunset
+    date announced in the release notes. `GET /device` reports the
+    `api_version` this camera serves; `GET /openapi.yaml` returns this
+    document as served by the camera.
+
+    ## Transport and authentication
+    The camera serves HTTP by default and HTTPS when enabled in Device
+    Settings; both serve this API when both are on. Enabling HTTPS is
+    recommended. A camera with no Admin user accepts requests without
+    credentials. Once an Admin exists, every request except `/health`,
+    `/whoami` and `/openapi.yaml` requires HTTP Basic credentials of a user
+    account. Create one account per integrating system.
+servers:
+  - url: /api/integration/v1
+security:
+  - basicAuth: []
+tags:
+  - name: device
+    description: Health, identity and state of the camera.
+  - name: trigger
+    description: Fire an inspection and get its result in the same call.
+  - name: results
+    description: Read, poll and stream inspection results, with their images.
+  - name: recipes
+    description: List and switch inspection recipes.
+  - name: statistics
+    description: Pass/fail counters.
+  - name: control
+    description: Run and setup mode.
+  - name: fieldbus
+    description: Industrial fieldbus configuration.
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      tags:
+        - device
+      summary: Liveness check
+      description: Returns 200 whenever the API process is up, with no authentication.
+      security: []
+      responses:
+        '200':
+          description: The API is up.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /openapi.yaml:
+    get:
+      operationId: getOpenApiSpec
+      tags:
+        - device
+      summary: This document, as served by this camera
+      description: Returns the OpenAPI document for the version of the API this firmware serves.
+      security: []
+      responses:
+        '200':
+          description: OpenAPI 3.1 YAML.
+          content:
+            application/yaml:
+              schema:
+                type: string
+  /whoami:
+    get:
+      operationId: getWhoami
+      tags:
+        - device
+      summary: Identify the caller and what it may do
+      description: |
+        Needs no credentials and never answers 401 or 403. With no
+        credentials it reports whether the camera requires them; with valid
+        credentials it also reports the caller's role and the operations that
+        role may invoke. The first call to make when a request returns 401 or
+        403.
+      security: []
+      responses:
+        '200':
+          description: Resolved identity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Whoami'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /device:
+    get:
+      operationId: getDevice
+      tags:
+        - device
+      summary: Device identity and versions
+      description: Serial number, product name, firmware and API versions, hostname, and whether authentication and HTTPS are enabled.
+      responses:
+        '200':
+          description: Device identity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /status:
+    get:
+      operationId: getStatus
+      tags:
+        - device
+      summary: Current operating state
+      description: The camera's mode, active recipe, fieldbus protocol, and uptime.
+      responses:
+        '200':
+          description: Operating state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /trigger:
+    post:
+      operationId: trigger
+      tags:
+        - trigger
+      summary: Trigger an inspection and return its result
+      description: |
+        Fires one inspection on the active recipe and waits up to `wait_ms`
+        (default 5000) for its result.
+
+        Before the first call: the camera must be in run mode (`POST
+        /mode/run`) and the active recipe's trigger settings must enable the
+        HTTP source. Otherwise the call answers 409 at once.
+
+        - **200**: the finished result.
+        - **202**: admitted, but not finished within `wait_ms` (`wait_ms: 0`
+          always answers 202 at once). Poll `GET /results?trigger_id=` with
+          the returned `trigger_id` until the result appears; `result_id` is
+          included only when it is already known.
+        - **409**: the camera's state must change first; retrying unchanged
+          does not help. `code` says what to change.
+        - **503**: a temporary condition; retry. `code` says which.
+
+        The camera inspects one trigger at a time per trigger source (plus
+        as many as the recipe's trigger buffer depth, default 0, may wait).
+        A trigger sent while the previous one is still being inspected is
+        refused with 503 `trigger_source_overrun`, so send the next trigger
+        after the previous response arrives.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerRequest'
+      responses:
+        '200':
+          description: The inspection finished.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+        '202':
+          description: Trigger admitted; result not ready within wait_ms.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerPending'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: |
+            The camera's state must change before a trigger can succeed.
+            `code` is `trigger_source_not_enabled` (enable the HTTP source
+            in the active recipe), `trigger_phase_not_production` (switch to
+            run mode), `trigger_no_recipe` (activate a recipe) or
+            `trigger_disabled` (triggers are disabled from the PLC).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          description: |
+            A temporary condition; retry later. `code` is one of the other
+            `TriggerRejectionCode` values (each value's description says what
+            it means) or `sys_daemon_unavailable` when the camera's
+            inspection service could not be reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /results:
+    get:
+      operationId: listResults
+      tags:
+        - results
+      summary: List results, newest first
+      description: A cursor-paginated page of results, optionally filtered by recipe, judgment, time range or trigger id.
+      parameters:
+        - in: query
+          name: recipe_id
+          description: Only results of the recipe that currently has this recipe number. A number no recipe has returns an empty page.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 32767
+        - in: query
+          name: judgment
+          description: Only results with this overall judgment.
+          schema:
+            $ref: '#/components/schemas/Judgment'
+        - in: query
+          name: since
+          description: Only results captured at or after this time (inclusive). Use the `captured_at` of the last result you have to catch up after a gap, and skip ids you already hold.
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: until
+          description: Only results captured before this time (exclusive).
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: trigger_id
+          description: Only the result of this trigger — the `trigger_id` a `POST /trigger` returned.
+          schema:
+            type: integer
+            format: int64
+        - in: query
+          name: limit
+          description: Maximum results per page. A page may hold fewer than `limit` results even when more exist; continue until `next_cursor` is empty.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - in: query
+          name: cursor
+          description: The `next_cursor` of the previous page; omit for the first page.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A page of results.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /results/latest:
+    get:
+      operationId: getLatestResult
+      tags:
+        - results
+      summary: The most recent result
+      description: The common poll for a supervisory system that only cares about the last inspection.
+      responses:
+        '200':
+          description: Latest result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /results/stream:
+    get:
+      operationId: streamResults
+      tags:
+        - results
+      summary: Server-Sent Events stream of results
+      description: |
+        A Server-Sent Events stream of inspections as they finish, in the
+        order they finished. Three kinds of frame arrive:
+
+        - `event: result` with `data:` holding a Result JSON object, for
+          every run-mode inspection whose result was stored.
+        - `: skipped <trigger_id>`, a comment line, for an inspection that
+          has no stored result: one run in setup mode or as a live preview,
+          or one whose result was not stored within 3 seconds. Clients that
+          only read `data:` lines can ignore it.
+        - `: keep-alive`, a comment line sent every 15 seconds. Set the
+          client's read timeout above 15 seconds.
+
+        The stream starts at the moment of connection and cannot be resumed:
+        inspections that finish while no client is connected are not
+        replayed. After reconnecting, fetch what was missed with `GET
+        /results?since=` (the `captured_at` of the last result received).
+        Browser `EventSource` cannot send an `Authorization` header, so use
+        a plain HTTP client on a secured camera.
+      responses:
+        '200':
+          description: text/event-stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /results/{id}:
+    get:
+      operationId: getResult
+      tags:
+        - results
+      summary: One result
+      description: The full result object for one inspection, identified by its result id.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /results/{id}/image:
+    get:
+      operationId: getResultImage
+      tags:
+        - results
+      summary: The inspected image (JPEG)
+      description: The full-frame image captured for this result, when the camera kept one.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: JPEG bytes.
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          description: The image was not kept for this result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /results/{id}/tools/{tool_id}/heatmap:
+    get:
+      operationId: getResultHeatmap
+      tags:
+        - results
+      summary: Class-activation heatmap of one region (RGBA PNG)
+      description: Renders the named region's activation grid as a PNG tinted with the region's class color; alpha is the squared activation, matching the dashboard overlay.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: tool_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: region
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: PNG tinted with the region's class color; alpha is the squared activation, matching the dashboard overlay.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /results/{id}/tools/{tool_id}/mask:
+    get:
+      operationId: getResultMask
+      tags:
+        - results
+      summary: Segmentation mask of one region (indexed PNG)
+      description: Renders the named region's stored segmentation mask as an indexed PNG; the palette is indexed by each class's stored mask value, using the capture's recorded class colors and falling back to the recipe's classes.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: tool_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: roi
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Indexed PNG; palette is indexed by each class's stored mask value, index 0 transparent.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /recipes:
+    get:
+      operationId: listRecipes
+      tags:
+        - recipes
+      summary: List recipes
+      description: Every recipe stored on the camera, active or not.
+      responses:
+        '200':
+          description: All recipes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecipeList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /recipes/active:
+    get:
+      operationId: getActiveRecipe
+      tags:
+        - recipes
+      summary: The active recipe
+      description: The recipe currently loaded for inspection; 404 when none is active.
+      responses:
+        '200':
+          description: Active recipe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Recipe'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /recipes/{id}/activate:
+    post:
+      operationId: activateRecipe
+      tags:
+        - recipes
+      summary: Make a recipe the active one
+      description: Loads the recipe with this recipe number and makes it the one the camera inspects against; 404 when no recipe has the number, 409 when the switch cannot proceed right now.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: The recipe number (the recipe's `id`, the same number a PLC selects it by).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 32767
+      responses:
+        '200':
+          description: Now active.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Recipe'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The recipe cannot be activated (see `code`, e.g. `recipe_switch_refused`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /statistics:
+    get:
+      operationId: getStatistics
+      tags:
+        - statistics
+      summary: Pass/fail counters per recipe
+      description: |
+        Pass, fail and not-inspected counts for each recipe that has run
+        since the counters last started from zero. `total` is always `pass
+        + fail + not_inspected`; yield is `pass / (pass + fail)`.
+
+        The counters are kept in memory. They start from zero when the
+        camera or its inspection service restarts, and when `POST
+        /statistics/reset` is called; each recipe's `since` is when its
+        current count began. They count every inspection, including test
+        inspections in setup mode that `GET /results` does not list, so
+        they can exceed the number of stored results. A recipe that has
+        been deleted stays listed until the counters next start from zero.
+        For counts that must survive a restart, count stored results with
+        `GET /results` instead.
+      responses:
+        '200':
+          description: Statistics snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Statistics'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /statistics/reset:
+    post:
+      operationId: resetStatistics
+      tags:
+        - statistics
+      summary: Reset all counters
+      description: Zeroes every counter and restarts the since timestamp.
+      responses:
+        '204':
+          description: Counters reset.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /statistics/stream:
+    get:
+      operationId: streamStatistics
+      tags:
+        - statistics
+      summary: Server-Sent Events stream of statistics snapshots
+      description: |
+        First event is the current snapshot, then one per change.
+        `event: statistics`, `data:` is a Statistics object (see `GET
+        /statistics` for what the counters include). A `: keep-alive`
+        comment line is sent every 15 seconds.
+      responses:
+        '200':
+          description: text/event-stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /mode/run:
+    post:
+      operationId: setModeRun
+      tags:
+        - control
+      summary: Switch to run mode
+      description: |
+        Starts switching the camera to run mode, where triggers are accepted
+        and every inspection's result is stored. The switch finishes in the
+        background, usually within a few seconds: until it does, `GET
+        /status` (and this response) show the previous `mode` with
+        `mode_changing: true`. Poll `GET /status` until `mode` is `run` and
+        `mode_changing` is false before sending triggers. Calling it while
+        already in run mode is harmless.
+      responses:
+        '200':
+          description: The switch was accepted. The body is the state at that moment, so `mode` may still show the previous mode while `mode_changing` is true.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: A mode change is already in progress or was refused (see `code`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /mode/setup:
+    post:
+      operationId: setModeSetup
+      tags:
+        - control
+      summary: Switch to setup mode
+      description: |
+        Starts switching the camera to setup mode, where recipes can be
+        edited, `POST /trigger` answers 409 `trigger_phase_not_production`,
+        and inspections (such as live previews) are not stored. The switch
+        finishes in the background, usually within a few seconds: until it
+        does, `GET /status` (and this response) show the previous `mode`
+        with `mode_changing: true`. Poll `GET /status` until `mode` is
+        `setup` and `mode_changing` is false. Calling it while already in
+        setup mode is harmless.
+      responses:
+        '200':
+          description: The switch was accepted. The body is the state at that moment, so `mode` may still show the previous mode while `mode_changing` is true.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: A mode change is already in progress or was refused (see `code`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /fieldbus:
+    get:
+      operationId: getFieldbus
+      tags:
+        - fieldbus
+      summary: Active fieldbus protocol and parameters
+      description: The industrial fieldbus protocol currently active on the camera and its read-only parameters.
+      responses:
+        '200':
+          description: Fieldbus configuration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fieldbus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /fieldbus/descriptor:
+    get:
+      operationId: getFieldbusDescriptor
+      tags:
+        - fieldbus
+      summary: Download the GSDML or EDS file for the active protocol
+      description: The device description file a PLC engineering tool imports for the camera's active fieldbus protocol; 404 when no fieldbus protocol is active.
+      responses:
+        '200':
+          description: Descriptor file, packaged as a zip archive.
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: HTTP Basic credentials of a camera user account. Not required while the camera has no Admin user.
+  responses:
+    BadRequest:
+      description: Malformed request.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Missing or invalid credentials.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: The account's role does not permit this operation.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: No such resource.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ServiceUnavailable:
+      description: The camera's inspection service is temporarily unavailable; retry.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Unexpected error on the camera.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Error:
+      type: object
+      additionalProperties: false
+      required:
+        - error
+        - code
+        - request_id
+      properties:
+        error:
+          type: string
+          description: Human-readable message.
+        code:
+          type: string
+          description: Stable machine-readable code.
+        request_id:
+          type: string
+          description: Correlates with the camera's logs.
+    TriggerError:
+      type: object
+      additionalProperties: false
+      required:
+        - error
+        - code
+        - request_id
+      properties:
+        error:
+          type: string
+          description: Human-readable message.
+        code:
+          $ref: '#/components/schemas/TriggerRejectionCode'
+        request_id:
+          type: string
+          description: Correlates with the camera's logs.
+    HealthStatus:
+      type: string
+      enum:
+        - ok
+    Health:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+      properties:
+        status:
+          $ref: '#/components/schemas/HealthStatus'
+    WhoamiRole:
+      type: string
+      description: The caller's resolved role, or anonymous with no credentials on an unsecured camera.
+      enum:
+        - admin
+        - engineer
+        - operator
+        - readonly
+        - anonymous
+    Whoami:
+      type: object
+      additionalProperties: false
+      required:
+        - auth_required
+        - username
+        - role
+        - allowed
+      properties:
+        auth_required:
+          type: boolean
+          description: Whether this camera requires credentials at all.
+        username:
+          type: string
+          description: Empty when no credentials were presented.
+        role:
+          $ref: '#/components/schemas/WhoamiRole'
+        allowed:
+          type: array
+          description: Operation ids this caller may invoke.
+          items:
+            type: string
+    Device:
+      type: object
+      additionalProperties: false
+      required:
+        - serial_number
+        - model
+        - firmware_version
+        - api_version
+        - hostname
+        - auth_required
+        - tls_enabled
+      properties:
+        serial_number:
+          type: string
+        model:
+          type: string
+          description: Product name, e.g. OV Spark Pro.
+        firmware_version:
+          type: string
+        api_version:
+          type: string
+          description: The version of this API document served by the camera.
+        hostname:
+          type: string
+        auth_required:
+          type: boolean
+        tls_enabled:
+          type: boolean
+    Mode:
+      type: string
+      description: |
+        - `run`: production. Triggers are accepted and every inspection's result is stored.
+        - `setup`: recipes can be edited; `POST /trigger` is refused and inspections are not stored.
+      enum:
+        - run
+        - setup
+    Status:
+      type: object
+      additionalProperties: false
+      required:
+        - mode
+        - mode_changing
+        - active_recipe_id
+        - active_recipe_uuid
+        - active_recipe_name
+        - fieldbus_protocol
+        - uptime_s
+      properties:
+        mode:
+          $ref: '#/components/schemas/Mode'
+        mode_changing:
+          type: boolean
+          description: A mode change is in progress; `mode` still shows the mode being left until it completes.
+        active_recipe_id:
+          type: integer
+          minimum: 0
+          maximum: 32767
+          description: The active recipe's number; 0 when no recipe is active.
+        active_recipe_uuid:
+          type: string
+          description: The active recipe's uuid; empty when no recipe is active.
+        active_recipe_name:
+          type: string
+          description: The active recipe's name; empty when no recipe is active.
+        fieldbus_protocol:
+          $ref: '#/components/schemas/FieldbusProtocol'
+        uptime_s:
+          type: integer
+          format: int64
+          description: Seconds since the camera last booted.
+    TriggerRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        wait_ms:
+          type: integer
+          minimum: 0
+          maximum: 30000
+          default: 5000
+          description: How long to wait for the result before answering 202.
+        reason:
+          type: string
+          maxLength: 200
+          description: Free text recorded in the audit log.
+    TriggerPending:
+      type: object
+      additionalProperties: false
+      required:
+        - trigger_id
+      properties:
+        result_id:
+          type: string
+          format: uuid
+          description: The result's id, present only when it was already known when `wait_ms` ran out. Poll `GET /results?trigger_id=` with `trigger_id`, which always works.
+        trigger_id:
+          type: integer
+          format: int64
+          description: Identifies this trigger; the result carries the same `trigger_id`.
+    Judgment:
+      type: string
+      description: |
+        The inspection's overall verdict, from the recipe's judgment rules.
+        - `pass`: the part passed.
+        - `fail`: the part failed.
+        - `not_inspected`: the part could not be inspected — every inspection tool was skipped because alignment did not find the part, and no judgment rule failed. Treat it as a reject; statistics count it separately from `fail`.
+      enum:
+        - pass
+        - fail
+        - not_inspected
+    ToolJudgment:
+      type: string
+      description: |
+        One tool's verdict. The words differ from the overall `Judgment` (`ok`/`ng` rather than `pass`/`fail`).
+        - `ok`: the tool passed.
+        - `ng`: the tool failed ("no good").
+        - `indeterminate`: the tool ran but could not reach a verdict. Treated as a failure.
+        - `not_applicable`: the tool did not run, because the alignment it depends on did not find the part (`error` is `not_executed`). Treated as a failure unless the recipe's judgment rules exclude it.
+      enum:
+        - ok
+        - ng
+        - indeterminate
+        - not_applicable
+    ToolError:
+      type: string
+      description: |
+        Why a tool could not produce a normal result; `none` when it could. A tool with an error still has a `judgment`.
+        - `none`: no error.
+        - `not_executed`: the tool was skipped because the alignment it depends on did not find the part.
+        - `time_budget`: reserved; not reported by current firmware.
+        - `model_unavailable`: reserved; not reported by current firmware.
+        - `no_pixels`: the tool's region had no usable image (for example, it lies outside the frame).
+        - `config`: the tool's configuration is invalid or incomplete.
+        - `internal`: the tool failed while running, or the camera could not read what it stored. Worth reporting to support with the `request_id`.
+      enum:
+        - none
+        - not_executed
+        - time_budget
+        - model_unavailable
+        - no_pixels
+        - config
+        - internal
+    TriggerSource:
+      type: string
+      description: |
+        What fired the inspection.
+        - `http`: `POST /trigger` on this API.
+        - `plc`: a PLC over the industrial fieldbus.
+        - `gpio`: the camera's digital trigger input.
+        - `manual`: a person, from the camera's web interface.
+        - `interval`: the recipe's own timer.
+        - `ai`: the recipe's AI trigger (a part was detected in view).
+      enum:
+        - http
+        - plc
+        - gpio
+        - manual
+        - interval
+        - ai
+    ToolType:
+      type: string
+      description: Known tool types. New types may be added in later minor versions.
+      enum:
+        - classical.aligner
+        - classical.barcode
+        - classical.color_match
+        - ai_fast_classifier
+        - ai_counting
+        - ai_ocr
+        - ai_segmentation
+    ToolResult:
+      type: object
+      additionalProperties: false
+      required:
+        - tool_id
+        - plc_slot
+        - name
+        - tool_type
+        - judgment
+        - error
+        - score
+        - execute_ms
+      properties:
+        tool_id:
+          type: string
+          format: uuid
+        plc_slot:
+          type: integer
+          minimum: 0
+          maximum: 64
+          description: The tool's PLC slot (1–64), as set in the recipe now; 0 when the tool has no slot or has since been removed from the recipe.
+        name:
+          type: string
+        tool_type:
+          $ref: '#/components/schemas/ToolType'
+        judgment:
+          $ref: '#/components/schemas/ToolJudgment'
+        error:
+          $ref: '#/components/schemas/ToolError'
+        score:
+          type: number
+          description: Tool-specific score; see the matching detail object for its scale and meaning.
+        execute_ms:
+          type: integer
+        barcode:
+          $ref: '#/components/schemas/BarcodeDetail'
+        ocr:
+          $ref: '#/components/schemas/OcrDetail'
+        counting:
+          $ref: '#/components/schemas/CountingDetail'
+        color_match:
+          $ref: '#/components/schemas/ColorMatchDetail'
+        fast_classifier:
+          $ref: '#/components/schemas/FastClassifierDetail'
+        segmentation:
+          $ref: '#/components/schemas/SegmentationDetail'
+        aligner:
+          $ref: '#/components/schemas/AlignerDetail'
+    Result:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - trigger_id
+        - recipe_id
+        - recipe_uuid
+        - recipe_name
+        - judgment
+        - captured_at
+        - processed_at
+        - processing_ms
+        - trigger_source
+        - image_url
+        - tools
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The result's id, for `GET /results/{id}`.
+        trigger_id:
+          type: integer
+          format: int64
+          description: The trigger that produced this result.
+        recipe_id:
+          type: integer
+          minimum: 0
+          maximum: 32767
+          description: The recipe's current number; 0 when the recipe has since been deleted.
+        recipe_uuid:
+          type: string
+          format: uuid
+          description: The recipe's uuid, kept even after the recipe is deleted.
+        recipe_name:
+          type: string
+          description: The recipe's current name; empty when the recipe has since been deleted.
+        judgment:
+          $ref: '#/components/schemas/Judgment'
+        captured_at:
+          type: string
+          format: date-time
+          description: When the image was captured.
+        processed_at:
+          type: string
+          format: date-time
+          description: When the inspection finished.
+        processing_ms:
+          type: integer
+          description: Milliseconds from capture to the finished verdict (`processed_at - captured_at`).
+        trigger_source:
+          $ref: '#/components/schemas/TriggerSource'
+        image_url:
+          type: string
+          format: uri-reference
+          description: Path of the full-frame JPEG on this camera (prefix it with the camera's scheme and host); empty when the image was not kept.
+        tools:
+          type: array
+          description: One entry per enabled tool of the recipe, alignment tools first.
+          items:
+            $ref: '#/components/schemas/ToolResult'
+    ResultPage:
+      type: object
+      additionalProperties: false
+      required:
+        - results
+        - next_cursor
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Result'
+        next_cursor:
+          type: string
+          description: Empty when there are no more results.
+    Recipe:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - uuid
+        - name
+        - description
+        - tags
+        - is_active
+        - updated_at
+      properties:
+        id:
+          type: integer
+          minimum: 1
+          maximum: 32767
+          description: 'The recipe number, for `POST /recipes/{id}/activate`: the same number a PLC selects the recipe by. It can be changed on the recipe''s Outputs page.'
+        uuid:
+          type: string
+          format: uuid
+          description: The recipe's permanent identifier; it never changes and is never reused.
+        name:
+          type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        is_active:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+    RecipeList:
+      type: object
+      additionalProperties: false
+      required:
+        - recipes
+      properties:
+        recipes:
+          type: array
+          items:
+            $ref: '#/components/schemas/Recipe'
+    RecipeStatistics:
+      type: object
+      additionalProperties: false
+      required:
+        - recipe_id
+        - recipe_uuid
+        - total
+        - pass
+        - fail
+        - not_inspected
+        - since
+      properties:
+        recipe_id:
+          type: integer
+          minimum: 0
+          maximum: 32767
+          description: The recipe's current number; 0 when the recipe has since been deleted.
+        recipe_uuid:
+          type: string
+          format: uuid
+        total:
+          type: integer
+          format: int64
+        pass:
+          type: integer
+          format: int64
+        fail:
+          type: integer
+          format: int64
+        not_inspected:
+          type: integer
+          format: int64
+        since:
+          type: string
+          format: date-time
+          description: 'When this recipe''s current count began: the last reset or restart, or, for a recipe first used after that, when the camera first loaded or ran it.'
+    Statistics:
+      type: object
+      additionalProperties: false
+      required:
+        - recipes
+      properties:
+        recipes:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecipeStatistics'
+    FieldbusProtocol:
+      type: string
+      description: |
+        The industrial fieldbus the camera is set to speak to a PLC.
+        - `unspecified`: no fieldbus has ever been configured on this camera.
+        - `off`: a fieldbus was configured and then turned off.
+        - `profinet`: PROFINET.
+        - `ethernet_ip`: EtherNet/IP.
+      enum:
+        - unspecified
+        - 'off'
+        - profinet
+        - ethernet_ip
+    Fieldbus:
+      type: object
+      additionalProperties: false
+      required:
+        - active_protocol
+        - profinet_device_name
+        - params
+      properties:
+        active_protocol:
+          $ref: '#/components/schemas/FieldbusProtocol'
+        profinet_device_name:
+          type: string
+        params:
+          type: object
+          additionalProperties:
+            type: string
+    BarcodeDetail:
+      description: Detail for a classical.barcode tool. Present only when tool_type is classical.barcode.
+      type: object
+      additionalProperties: false
+      required:
+        - decoded
+        - data
+        - symbology
+        - match_outcome
+        - failure_cause
+      properties:
+        decoded:
+          type: boolean
+          description: Whether a barcode was successfully decoded in this region.
+        data:
+          type: string
+          description: The decoded barcode payload; empty when not decoded.
+        symbology:
+          type: string
+          enum:
+            - unspecified
+            - auto
+            - data_matrix
+            - qr
+            - ean13
+            - code128
+          description: The barcode symbology detected in this region.
+        match_outcome:
+          type: string
+          enum:
+            - unspecified
+            - not_evaluated
+            - matched
+            - mismatch
+          description: Whether the decoded data matched the configured expected-content pattern.
+        failure_cause:
+          type: string
+          enum:
+            - unspecified
+            - none
+            - no_code_found
+            - decode_failed
+            - timeout
+            - match_failed
+            - not_inspected
+            - outside_region
+          description: Why no read was produced; NONE when a read was produced.
+    OcrDetail:
+      description: Detail for a ai_ocr tool. Present only when tool_type is ai_ocr.
+      type: object
+      additionalProperties: false
+      required:
+        - pass
+        - confidence
+        - min_char_confidence
+        - mismatch_count
+        - fields
+      properties:
+        pass:
+          type: boolean
+          description: Whether every configured field passed.
+        confidence:
+          type: number
+          description: Mean confidence over fields that decoded at least one character; 0 if none did.
+        min_char_confidence:
+          type: number
+          description: Lowest single-character confidence over all decoded characters; 0 if none decoded.
+        mismatch_count:
+          type: integer
+          description: Total differing character positions across fields with a content mismatch.
+        fields:
+          type: array
+          description: Per-field read results.
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - field_id
+              - label
+              - text_raw
+              - text_judged
+              - expected
+              - pass
+              - failure_cause
+              - confidence
+            properties:
+              field_id:
+                type: string
+                description: Stable identifier of this text field.
+              label:
+                type: string
+                description: User-facing label for this text field.
+              text_raw:
+                type: string
+                description: The raw decoded text, before masking low-confidence characters.
+              text_judged:
+                type: string
+                description: The decoded text used for judgment, with low-confidence characters masked.
+              expected:
+                type: string
+                description: The expected content this field was checked against on this cycle.
+              pass:
+                type: boolean
+                description: Whether this field passed.
+              failure_cause:
+                type: string
+                enum:
+                  - unspecified
+                  - none
+                  - no_text
+                  - low_confidence
+                  - low_margin
+                  - pattern_mismatch
+                  - content_mismatch
+                  - count_out_of_range
+                  - roi_clipped
+                  - text_too_small
+                  - rotation_high
+                description: The primary reason this field failed; NONE when it passed.
+              confidence:
+                type: number
+                description: Mean confidence over this field's decoded characters.
+    CountingDetail:
+      description: Detail for a ai_counting tool. Present only when tool_type is ai_counting.
+      type: object
+      additionalProperties: false
+      required:
+        - count
+        - passed
+        - expected_min
+        - expected_max
+        - threshold
+        - missing_count
+        - detections
+        - missing
+      properties:
+        count:
+          type: integer
+          description: Number of detections at or above the confidence threshold.
+        passed:
+          type: boolean
+          description: Whether the count fell within the configured expected range.
+        expected_min:
+          type: integer
+          description: Configured minimum expected count.
+        expected_max:
+          type: integer
+          description: Configured maximum expected count (0 = no maximum).
+        threshold:
+          type: number
+          description: The detection confidence threshold applied this frame.
+        missing_count:
+          type: integer
+          description: Number of expected master parts not found this frame.
+        detections:
+          type: array
+          description: Detected instances at or above the confidence threshold.
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - box
+              - confidence
+            properties:
+              box:
+                type: object
+                additionalProperties: false
+                required:
+                  - rect
+                  - angle_deg
+                properties:
+                  rect:
+                    type: object
+                    additionalProperties: false
+                    required:
+                      - x
+                      - 'y'
+                      - width
+                      - height
+                    properties:
+                      x:
+                        type: integer
+                        description: Left edge, sensor pixels.
+                      'y':
+                        type: integer
+                        description: Top edge, sensor pixels.
+                      width:
+                        type: integer
+                        description: Width, sensor pixels.
+                      height:
+                        type: integer
+                        description: Height, sensor pixels.
+                    description: Unrotated bounding box before applying angle_deg.
+                  angle_deg:
+                    type: number
+                    description: Rotation of the box about its center, degrees.
+                description: The detected instance's bounding box, sensor pixels.
+              confidence:
+                type: number
+                description: Detection confidence, 0-1.
+        missing:
+          type: array
+          description: Expected master parts not found this frame.
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - identifier
+            properties:
+              identifier:
+                type: string
+                description: Identifier of the missing master part.
+    Lch:
+      additionalProperties: false
+      properties:
+        c:
+          description: Chroma (colorfulness); 0 = grey.
+          type: number
+        h:
+          description: Hue angle in degrees, 0-360.
+          type: number
+        l:
+          description: Lightness, 0-100.
+          type: number
+      required:
+        - l
+        - c
+        - h
+      type: object
+    ColorMatchDetail:
+      description: Detail for a classical.color_match tool. Present only when tool_type is classical.color_match.
+      type: object
+      additionalProperties: false
+      required:
+        - measured_lab
+        - reference_lab
+        - delta_e
+        - score
+        - threshold
+        - measured_lch
+        - reference_lch
+      properties:
+        measured_lab:
+          type: object
+          additionalProperties: false
+          required:
+            - l
+            - a
+            - b
+          properties:
+            l:
+              type: number
+              description: Lightness, 0-100.
+            a:
+              type: number
+              description: Green-red axis.
+            b:
+              type: number
+              description: Blue-yellow axis.
+          description: Mean measured color over the region, CIE L*a*b*.
+        reference_lab:
+          type: object
+          additionalProperties: false
+          required:
+            - l
+            - a
+            - b
+          properties:
+            l:
+              type: number
+              description: Lightness, 0-100.
+            a:
+              type: number
+              description: Green-red axis.
+            b:
+              type: number
+              description: Blue-yellow axis.
+          description: Configured reference color, CIE L*a*b*.
+        delta_e:
+          type: number
+          description: CIEDE2000 color distance between the measured and reference colors.
+        score:
+          type: number
+          description: Match score, 0-100 (100 = exact match).
+        threshold:
+          type: integer
+          description: The match-score threshold applied this frame.
+        measured_lch:
+          $ref: '#/components/schemas/Lch'
+          description: 'Measured color as CIE LCh(ab): lightness, chroma and hue, equivalent to measured_lab in polar form.'
+        reference_lch:
+          $ref: '#/components/schemas/Lch'
+          description: 'Reference color as CIE LCh(ab): lightness, chroma and hue, equivalent to reference_lab in polar form.'
+    HeatmapRef:
+      additionalProperties: false
+      description: Class-activation map for a region, served as an RGBA PNG tinted with the region's class color; alpha is the squared activation, matching the dashboard overlay. url is empty and width/height are 0x0 when the region produced no heatmap.
+      properties:
+        height:
+          description: Grid height in cells, which is also the PNG's height in pixels.
+          minimum: 0
+          type: integer
+        max_logit:
+          description: The activation value that maps to a fully opaque cell.
+          type: number
+        min_logit:
+          description: The activation value that maps to a fully transparent cell. With max_logit, gives the raw range the PNG was scaled over; equal to max_logit for a flat map.
+          type: number
+        url:
+          description: Path of the PNG on this camera (prefix it with the camera's scheme and host); empty when the region produced no heatmap.
+          format: uri-reference
+          type: string
+        width:
+          description: 'Grid width in cells, which is also the PNG''s width in pixels (28 for the standard model). The grid covers the region''s crop rectangle: scale it to crop''s size to overlay it on the image.'
+          minimum: 0
+          type: integer
+      required:
+        - url
+        - width
+        - height
+        - min_logit
+        - max_logit
+      type: object
+    FastClassifierDetail:
+      description: Detail for a ai_fast_classifier tool. Present only when tool_type is ai_fast_classifier.
+      type: object
+      additionalProperties: false
+      required:
+        - overall
+        - class_id
+        - confidence
+        - threshold
+        - regions
+      properties:
+        overall:
+          type: string
+          enum:
+            - unspecified
+            - ok
+            - ng
+            - indeterminate
+          description: Worst-of verdict across all sub-regions.
+        class_id:
+          type: integer
+          description: Predicted class index of the first configured sub-region.
+        confidence:
+          type: number
+          description: Classification confidence of the first configured sub-region.
+        threshold:
+          type: number
+          description: The confidence threshold applied to the first configured sub-region.
+        regions:
+          type: array
+          description: Per-sub-region classification results.
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - label
+              - class_label
+              - confidence
+              - threshold
+              - pass
+              - verdict
+              - crop
+              - class_color
+              - heatmap
+            properties:
+              label:
+                type: string
+                description: User-facing label for this sub-region.
+              class_label:
+                type: string
+                description: Predicted class label for this sub-region.
+              confidence:
+                type: number
+                description: Classification confidence for this sub-region.
+              threshold:
+                type: number
+                description: The confidence threshold applied to this sub-region.
+              pass:
+                type: boolean
+                description: Whether this sub-region passed.
+              verdict:
+                type: string
+                enum:
+                  - unspecified
+                  - ok
+                  - ng
+                  - indeterminate
+                description: This sub-region's verdict.
+              crop:
+                type: object
+                additionalProperties: false
+                required:
+                  - rect
+                  - angle_deg
+                properties:
+                  rect:
+                    type: object
+                    additionalProperties: false
+                    required:
+                      - x
+                      - 'y'
+                      - width
+                      - height
+                    properties:
+                      x:
+                        type: integer
+                        description: Left edge, sensor pixels.
+                      'y':
+                        type: integer
+                        description: Top edge, sensor pixels.
+                      width:
+                        type: integer
+                        description: Width, sensor pixels.
+                      height:
+                        type: integer
+                        description: Height, sensor pixels.
+                    description: Unrotated bounding box before applying angle_deg.
+                  angle_deg:
+                    type: number
+                    description: Rotation of the crop about its center, degrees.
+                description: The region actually inspected, sensor pixels.
+              class_color:
+                type: string
+                description: Display color for the predicted class, as authored (#RRGGBB).
+              heatmap:
+                $ref: '#/components/schemas/HeatmapRef'
+                description: Class-activation heatmap for this sub-region, tinted with class_color; empty (0x0, no url) when this sub-region produced no heatmap.
+    SegmentationDetail:
+      description: Detail for a ai_segmentation tool. Present only when tool_type is ai_segmentation.
+      type: object
+      additionalProperties: false
+      required:
+        - overall
+        - defect_area_px
+        - blob_count
+        - largest_blob_px
+        - mean_confidence
+        - rois
+      properties:
+        overall:
+          type: string
+          enum:
+            - unspecified
+            - ok
+            - ng
+          description: Worst-of verdict across all regions of interest.
+        defect_area_px:
+          type: integer
+          format: int64
+          description: Total surviving pixel area of failing classes.
+        blob_count:
+          type: integer
+          description: Total surviving blob count across all classes.
+        largest_blob_px:
+          type: integer
+          format: int64
+          description: Pixel area of the largest surviving failing blob.
+        mean_confidence:
+          type: number
+          description: Mean per-pixel confidence over all regions of interest.
+        rois:
+          type: array
+          description: Per-region-of-interest segmentation results.
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - label
+              - verdict
+              - mean_confidence
+              - crop
+              - class_stats
+              - blobs
+              - blobs_truncated
+              - mask_url
+            properties:
+              label:
+                type: string
+                description: User-facing label for this region of interest.
+              verdict:
+                type: string
+                enum:
+                  - unspecified
+                  - ok
+                  - ng
+                description: This region's verdict.
+              mean_confidence:
+                type: number
+                description: Mean per-pixel confidence over this region of interest.
+              crop:
+                type: object
+                additionalProperties: false
+                required:
+                  - rect
+                  - angle_deg
+                properties:
+                  rect:
+                    type: object
+                    additionalProperties: false
+                    required:
+                      - x
+                      - 'y'
+                      - width
+                      - height
+                    properties:
+                      x:
+                        type: integer
+                        description: Left edge, image pixels.
+                      'y':
+                        type: integer
+                        description: Top edge, image pixels.
+                      width:
+                        type: integer
+                        description: Width, image pixels.
+                      height:
+                        type: integer
+                        description: Height, image pixels.
+                    description: Unrotated bounding box before applying angle_deg.
+                  angle_deg:
+                    type: number
+                    description: Rotation of the crop about its center, degrees.
+                description: The region actually inspected, image pixels.
+              class_stats:
+                type: array
+                description: Per-class pixel and blob statistics for this region.
+                items:
+                  type: object
+                  additionalProperties: false
+                  required:
+                    - class_label
+                    - num_blobs
+                    - total_px
+                    - mean_confidence
+                  properties:
+                    class_label:
+                      type: string
+                      description: The class this statistic covers.
+                    num_blobs:
+                      type: integer
+                      description: Surviving blob count for this class.
+                    total_px:
+                      type: integer
+                      format: int64
+                      description: Surviving pixel area for this class.
+                    mean_confidence:
+                      type: number
+                      description: Mean confidence over this class's surviving blobs.
+              blobs:
+                type: array
+                description: Individual surviving blobs, largest first.
+                items:
+                  type: object
+                  additionalProperties: false
+                  required:
+                    - class_label
+                    - area_px
+                    - bounding_box
+                    - centroid
+                  properties:
+                    class_label:
+                      type: string
+                      description: The class this blob belongs to.
+                    area_px:
+                      type: integer
+                      format: int64
+                      description: Blob pixel area.
+                    bounding_box:
+                      type: object
+                      additionalProperties: false
+                      required:
+                        - x
+                        - 'y'
+                        - width
+                        - height
+                      properties:
+                        x:
+                          type: number
+                          description: Left edge, image pixels.
+                        'y':
+                          type: number
+                          description: Top edge, image pixels.
+                        width:
+                          type: number
+                          description: Width, image pixels.
+                        height:
+                          type: number
+                          description: Height, image pixels.
+                      description: Axis-aligned bounding box, image pixels.
+                    centroid:
+                      type: object
+                      additionalProperties: false
+                      required:
+                        - x
+                        - 'y'
+                      properties:
+                        x:
+                          type: number
+                          description: X coordinate, image pixels.
+                        'y':
+                          type: number
+                          description: Y coordinate, image pixels.
+                      description: Blob centroid, image pixels.
+              blobs_truncated:
+                type: boolean
+                description: Whether the blob list was capped.
+              mask_url:
+                description: Link to the rendered result mask image for this region; empty string when no mask was stored for this region.
+                format: uri-reference
+                type: string
+    AlignerDetail:
+      description: Detail for a classical.aligner tool. Present only when tool_type is classical.aligner.
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - x
+        - 'y'
+        - rotation_deg
+        - scale
+        - score
+      properties:
+        status:
+          type: string
+          enum:
+            - unspecified
+            - aligned
+            - failed
+          description: 'Alignment outcome: aligned or failed.'
+        x:
+          type: number
+          description: Aligned template center, X, sensor pixels.
+        'y':
+          type: number
+          description: Aligned template center, Y, sensor pixels.
+        rotation_deg:
+          type: number
+          description: Aligned rotation, degrees, positive = counter-clockwise.
+        scale:
+          type: number
+          description: Aligned scale factor (1.0 = no scaling).
+        score:
+          type: number
+          description: Alignment confidence.
+    TriggerRejectionCode:
+      type: string
+      description: 'Why a trigger was refused. Each value''s description names the HTTP status it comes with: 409 means the camera''s state must change before a trigger can succeed, 503 means the condition clears on its own and the trigger can be retried. The same reason names are reported to a PLC over the fieldbus.'
+      enum:
+        - trigger_phase_not_production
+        - trigger_drain
+        - trigger_throttled
+        - trigger_no_recipe
+        - trigger_recipe_loading
+        - trigger_source_not_enabled
+        - trigger_source_overrun
+        - trigger_frame_unavailable
+        - trigger_camera_busy
+        - trigger_disabled
+        - trigger_result_queue_full
+        - trigger_rejected
+      x-enum-descriptions:
+        trigger_phase_not_production: HTTP 409. The camera is in setup mode; switch it to run mode (POST /mode/run) first.
+        trigger_drain: HTTP 503. The camera is finishing in-progress inspections before a mode change; retry shortly.
+        trigger_throttled: HTTP 503. The trigger arrived inside the minimum re-trigger interval the recipe sets for this source; retry after that interval.
+        trigger_no_recipe: HTTP 409. No recipe is active; activate one (POST /recipes/{id}/activate) first.
+        trigger_recipe_loading: HTTP 503. A recipe is being loaded; retry shortly.
+        trigger_source_not_enabled: HTTP 409. The active recipe's trigger settings do not enable this source (for this API, the HTTP source); enable it in the recipe first.
+        trigger_source_overrun: 'HTTP 503. Triggers from this source are arriving faster than the camera inspects them: one inspection runs at a time and the recipe''s trigger buffer depth (default 0) sets how many more may wait. Retry once the current inspection finishes.'
+        trigger_frame_unavailable: HTTP 503. The image for this trigger never arrived or was dropped; retry.
+        trigger_camera_busy: HTTP 503. The camera is held by an imaging preview, exposure sweep or autofocus; retry when it finishes.
+        trigger_disabled: HTTP 409. Triggers are disabled from the PLC (its Trigger Disable signal is set); clear it on the PLC first.
+        trigger_result_queue_full: HTTP 503. Every result slot is waiting for the PLC to acknowledge it; retry once the PLC has read its results.
+        trigger_rejected: HTTP 503. Refused for a reason this firmware does not name; retry later.
