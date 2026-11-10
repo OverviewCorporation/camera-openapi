@@ -1085,8 +1085,8 @@ Environment file updated successfully
 | 201 | Created | Resource created (e.g., uploads, create) |
 | 204 | No Content | Successful request with empty body |
 | 400 | Bad Request | Missing or invalid payload/params |
-| 401 | Unauthorized | Missing or invalid auth token |
-| 403 | Forbidden | Authenticated but not allowed or invalid file extension |
+| 401 | Unauthorized | Wrong username/password on `POST /edge/user/login`, a missing, invalid or expired token on `POST /edge/user/login/refresh`, or an invalid token on `GET /edge/user?me`. Other endpoints do not check credentials. |
+| 403 | Forbidden | `/edge/dl-files/` request for a file type other than `jpg`, `jpeg`, `png`, `onnx` or `jsonl` (lowercase only), or login/refresh for a deactivated user |
 | 404 | Not Found | Resource does not exist |
 | 405 | Method Not Allowed | HTTP method not supported for this endpoint |
 | 409 | Conflict | Duplicate or state conflict |

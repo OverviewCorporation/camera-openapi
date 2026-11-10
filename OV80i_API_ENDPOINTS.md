@@ -2165,8 +2165,8 @@ Success
 | 201 | Created | Resource created (e.g., uploads, create) |
 | 204 | No Content | Successful request with empty body |
 | 400 | Bad Request | Missing or invalid payload/params |
-| 401 | Unauthorized | Missing or invalid auth token |
-| 403 | Forbidden | Authenticated but not allowed |
+| 401 | Unauthorized | Wrong username/password on `POST /edge/v2/user/login`, or a missing or invalid token on `POST /edge/v2/user/login/refresh`. Other endpoints do not check credentials. |
+| 403 | Forbidden | `/edge/dl-files/` request for a file type other than `jpg`, `jpeg`, `png`, `onnx` or `jsonl` (lowercase only) |
 | 404 | Not Found | Resource does not exist |
 | 409 | Conflict | Duplicate or state conflict |
 | 422 | Unprocessable Entity | Validation failed or invalid file |
